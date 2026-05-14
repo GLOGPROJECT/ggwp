@@ -808,6 +808,20 @@ export default function EarthCommunity() {
       .catch((err) => console.error('[GlobeUsers]', err));
   }, []);
 
+  // 새 유저 가입 시 지구본에 실시간 추가
+  useEffect(() => {
+    const socket = getAppSocket();
+    if (!socket) return;
+    const onUserJoined = (newUser) => {
+      setApiGlobeUsers((prev) => {
+        if (prev.some((u) => Number(u.id) === Number(newUser.id))) return prev;
+        return [...prev, newUser];
+      });
+    };
+    socket.on('globe:user_joined', onUserJoined);
+    return () => socket.off('globe:user_joined', onUserJoined);
+  }, []);
+
   // 하루 첫 로그인 보상 요청 (로그인 유저가 확인된 시점에 1회만 실행)
   useEffect(() => {
     if (!me?.user_id) return;

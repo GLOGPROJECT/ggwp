@@ -49,7 +49,6 @@ class CanvasErrorBoundary extends Component {
   }
 }
 
-// Canvas 내부 전용 — 에러 시 아무것도 안 그림 (div 불가)
 class R3FErrorBoundary extends Component {
   state = { error: false };
   static getDerivedStateFromError() { return { error: true }; }
@@ -60,7 +59,7 @@ class R3FErrorBoundary extends Component {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// 카메라 lookAt 고정 (발바닥 대신 몸 중앙을 바라봄)
+// 카메라 lookAt 고정
 // ──────────────────────────────────────────────────────────────────
 function CameraSetup({ y = 0.85 }) {
   const { camera } = useThree();
@@ -105,13 +104,11 @@ function MyAvatarPreview({ url, pet }) {
         <ambientLight intensity={0.7} />
         <directionalLight position={[2, 5, 3]} intensity={1.2} />
         <directionalLight position={[-2, 2, -2]} intensity={0.3} />
-          {/* 내 아바타: 약간 왼쪽 */}
           <Suspense fallback={null}>
             <group position={[-0.45, 0, 0]}>
               <MyAvatarModel url={url} scale={1.15} />
             </group>
           </Suspense>
-          {/* 선택된 펫: 오른쪽 옆에 — 에러 시 캔버스 전체가 죽지 않도록 별도 경계 */}
           {pet?.image_url && (
             <R3FErrorBoundary key={pet.shop_item_id}>
               <Suspense fallback={null}>
@@ -261,6 +258,8 @@ export default function PetShopModal({ onClose, navHeight = 80 }) {
   useEffect(() => {
     api.get('/shop/items').then((res) => {
       setPets(res.data);
+      const equipped = res.data.find((p) => p.equipped);
+      if (equipped) setSelected(equipped);
     }).catch((err) => {
       console.error('[ShopItems Error]', err.message);
     });
@@ -427,15 +426,14 @@ export default function PetShopModal({ onClose, navHeight = 80 }) {
 // 스타일
 // ──────────────────────────────────────────────────────────────────
 
-/** 모달 본체: 화면 오른쪽, 투명도 70% */
 const modalStyle = {
   position: 'fixed',
   right: '10vw',
   width: '50vw',
   height: '30vw',
-  zIndex: 90,                                        // nav(100) 아래
+  zIndex: 90,
   borderRadius: 20,
-  background: 'rgba(15, 28, 54, 0.70)',              // 투명도 70%
+  background: 'rgba(15, 28, 54, 0.70)',
   backdropFilter: 'blur(14px)',
   WebkitBackdropFilter: 'blur(14px)',
   boxShadow: '0 8px 40px rgba(0,0,0,0.50)',
@@ -519,7 +517,6 @@ const buyBtnStyle = {
   flexShrink: 0,
 };
 
-/** 헤더 아래 좌우 분할 본문 */
 const bodyStyle = {
   flex: 1,
   display: 'flex',
@@ -527,7 +524,6 @@ const bodyStyle = {
   overflow: 'hidden',
 };
 
-/** 왼쪽: 내 아바타 열 */
 const avatarColStyle = {
   width: '55%',
   display: 'flex',
@@ -563,7 +559,6 @@ const avatarFallbackStyle = {
   justifyContent: 'center',
 };
 
-/** 오른쪽: 펫 정보 + 그리드 열 */
 const rightColStyle = {
   flex: 1,
   display: 'flex',
@@ -572,7 +567,6 @@ const rightColStyle = {
   overflow: 'hidden',
 };
 
-/** 3열 × 2행 그리드 */
 const gridStyle = {
   flex: 1,
   display: 'grid',
