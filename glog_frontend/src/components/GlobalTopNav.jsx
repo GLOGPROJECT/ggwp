@@ -6,7 +6,8 @@ import { useDmSocket } from '../dm/useDmSocket';
 import GuestModal from '../feed/components/GuestModal';
 import './GlobalTopNav.css';
 
-const BACKEND_URL = 'http://localhost:4000';
+import { API_ORIGIN } from '../api/axios';
+const BACKEND_URL = API_ORIGIN;
 
 /** `/`, `/globe`, `/feed` 등에서 동일한 상단 메뉴 */
 export default function GlobalTopNav() {

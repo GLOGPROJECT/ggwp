@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { API_ORIGIN } from '../api/axios';
 
 export function useDmSocket({ onReceive, onSent, onReadAck }) {
   const socketRef = useRef(null);
@@ -16,7 +17,7 @@ export function useDmSocket({ onReceive, onSent, onReadAck }) {
     let cancelled = false;
 
     const connect = (token) => {
-      const socket = io('http://localhost:4000', {
+      const socket = io(API_ORIGIN, {
         auth: { token },
       });
 
