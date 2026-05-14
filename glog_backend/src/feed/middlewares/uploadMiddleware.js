@@ -1,21 +1,18 @@
 /**
- * 게시글 이미지 업로드 (multer, 로컬 디스크).
- * 추후 S3: storage 팩토리만 교체하고 동일한 fileFilter/limits/에러 매핑을 유지하면 됨.
- * @see md/F01Feed.md
+ * 게시글 이미지 업로드 (multer-s3, S3 저장).
+ * 버킷: glogs3bucketforimage / 경로: feedimage/
  */
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
 const multer = require('multer');
+const multerS3 = require('multer-s3');
+const { S3Client } = require('@aws-sdk/client-s3');
+const crypto = require('crypto');
+const path = require('path');
 const { MulterError } = multer;
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 4;
 const FIELD_NAME = 'images';
-
-/** 로컬 저장 루트 (S3 전환 시 버킷 prefix 등으로 대체) */
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 
 const ALLOWED_MIMES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
@@ -27,26 +24,19 @@ function extFromMimetype(mimetype) {
   return '';
 }
 
-function ensureUploadDir() {
-  if (!fs.existsSync(UPLOAD_ROOT)) {
-    fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
-  }
-}
+const s3 = new S3Client({ region: process.env.AWS_REGION });
 
-// 추후 S3: multer.memoryStorage() + 업로드 서비스로 스트림 전달
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    try {
-      ensureUploadDir();
-      cb(null, UPLOAD_ROOT);
-    } catch (e) {
-      cb(e);
-    }
+const storage = multerS3({
+  s3,
+  bucket: process.env.S3_BUCKET_NAME,
+  contentType: multerS3.AUTO_CONTENT_TYPE,
+  metadata(req, file, cb) {
+    cb(null, { fieldName: file.fieldname });
   },
-  filename(req, file, cb) {
+  key(req, file, cb) {
     const ext = extFromMimetype(file.mimetype) || path.extname(file.originalname || '').toLowerCase();
     const safe = /^\.(jpe?g|png|gif|webp)$/i.test(ext) ? ext : '.bin';
-    const name = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}${safe}`;
+    const name = `feedimage/${Date.now()}-${crypto.randomBytes(8).toString('hex')}${safe}`;
     cb(null, name);
   },
 });
@@ -57,7 +47,6 @@ const upload = multer({
     fileSize: MAX_FILE_BYTES,
     files: MAX_FILES,
   },
-  /** UTF-8 필드(본문·해시태그 JSON·link_preview JSON 등). latin1 기본값이면 한글 OG 메타에서 링크 JSON 파싱 실패 */
   defParamCharset: 'utf8',
   fileFilter(req, file, cb) {
     if (!ALLOWED_MIMES.has(file.mimetype)) {
@@ -72,47 +61,28 @@ const upload = multer({
 const parser = upload.array(FIELD_NAME, MAX_FILES);
 
 function sendInvalidType(res) {
-  res.status(400).json({
-    error: '허용되지 않는 파일 형식입니다',
-    code: 'INVALID_FILE_TYPE',
-  });
+  res.status(400).json({ error: '허용되지 않는 파일 형식입니다', code: 'INVALID_FILE_TYPE' });
 }
-
 function sendTooLarge(res) {
-  res.status(400).json({
-    error: '파일 크기는 5MB를 초과할 수 없습니다',
-    code: 'FILE_TOO_LARGE',
-  });
+  res.status(400).json({ error: '파일 크기는 5MB를 초과할 수 없습니다', code: 'FILE_TOO_LARGE' });
 }
-
 function sendTooMany(res) {
-  res.status(400).json({
-    error: '이미지는 최대 4장까지 첨부 가능합니다',
-    code: 'TOO_MANY_FILES',
-  });
+  res.status(400).json({ error: '이미지는 최대 4장까지 첨부 가능합니다', code: 'TOO_MANY_FILES' });
 }
 
 /**
  * 게시글 작성/수정용 multipart 처리.
- * 필드명 `images`, 최대 4장, 장당 5MB, MIME jpg/jpeg/png/gif/webp.
- * multipart가 아닌 요청은 그대로 통과(req.files 없음).
+ * 업로드 후 req.files[i].location 에 S3 public URL이 담김.
  */
 function uploadImages(req, res, next) {
   parser(req, res, (err) => {
     if (!err) return next();
 
     if (err instanceof MulterError) {
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return sendTooLarge(res);
-      }
-      if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
-        return sendTooMany(res);
-      }
+      if (err.code === 'LIMIT_FILE_SIZE') return sendTooLarge(res);
+      if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') return sendTooMany(res);
     }
-
-    if (err && err.code === 'INVALID_FILE_TYPE') {
-      return sendInvalidType(res);
-    }
+    if (err?.code === 'INVALID_FILE_TYPE') return sendInvalidType(res);
 
     return next(err);
   });
@@ -120,7 +90,6 @@ function uploadImages(req, res, next) {
 
 module.exports = {
   uploadImages,
-  UPLOAD_ROOT,
   MAX_FILE_BYTES,
   MAX_FILES,
   FIELD_NAME,

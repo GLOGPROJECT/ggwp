@@ -3,10 +3,7 @@
  * @see md/F01Feed.md
  */
 
-const fs = require('fs');
-const path = require('path');
 const prisma = require('../../config/db');
-const { UPLOAD_ROOT } = require('../middlewares/uploadMiddleware');
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -639,18 +636,8 @@ function err(code, message, httpStatus = 400) {
   return e;
 }
 
-function safeUnlinkUpload(imageUrl) {
-  if (!imageUrl || typeof imageUrl !== 'string') return;
-  const m = imageUrl.match(/^\/uploads\/([^/]+)$/);
-  if (!m) return;
-  const root = path.resolve(UPLOAD_ROOT);
-  const fp = path.resolve(path.join(root, m[1]));
-  if (!fp.startsWith(root)) return;
-  try {
-    if (fs.existsSync(fp)) fs.unlinkSync(fp);
-  } catch {
-    /* ignore */
-  }
+function safeUnlinkUpload(_imageUrl) {
+  // S3 저장 방식으로 전환 — 로컬 파일 삭제 불필요
 }
 
 /** # 제거·소문자, 순서 유지 중복 제거. 고유 태그가 5개 초과면 400 */
@@ -752,7 +739,7 @@ async function insertPostImagesTx(tx, postId, files) {
       data: {
         id: nextImageId,
         post_id: postId,
-        image_url: `/uploads/${f.filename}`,
+        image_url: f.location,
         display_order: displayOrder,
       },
     });
