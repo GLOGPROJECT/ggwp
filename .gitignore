@@ -36,3 +36,7 @@ glog_backend/uploads/
 
 #troubleshooting
 TROUBLESHOOTING.md
+
+#ssh
+glog_ssh_keypair.pem
+glog_ssh_guide.txt
