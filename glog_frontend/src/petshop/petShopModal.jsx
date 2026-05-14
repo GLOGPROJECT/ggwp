@@ -18,10 +18,8 @@ import api from '../api/axios';
 const PET_META = {
   1: { emoji: '🐰', scale: 0.3 },
   2: { emoji: '🐸', scale: 0.4, rotation: [0, -Math.PI / 2, 0] },
-  3: { emoji: '🐧', scale: 1 },
-  4: { emoji: '🚲', scale: 1 },
-  5: { emoji: '🐔', scale: 1 },
-  6: { emoji: '🦊', scale: 1 },
+  3: { emoji: '🚲', scale: 1 },
+  4: { emoji: '🐔', scale: 1 },
 };
 
 // S3에 존재하는 GLB preload
@@ -174,7 +172,7 @@ function PetCard({ pet, isSelected, isEquipped, isOwned, coins, onSelect, onPurc
 
       {/* 호버 오버레이 */}
       {hovered && (
-        <div style={hoverOverlayStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={hoverOverlayStyle} onClick={() => onSelect(pet)}>
           {!isOwned && (
             <button
               style={{
@@ -184,7 +182,7 @@ function PetCard({ pet, isSelected, isEquipped, isOwned, coins, onSelect, onPurc
                 cursor: canAfford ? 'pointer' : 'not-allowed',
               }}
               disabled={!canAfford}
-              onClick={() => onPurchase(pet)}
+              onClick={(e) => { e.stopPropagation(); onPurchase(pet); }}
             >
               구매하기
             </button>
@@ -192,7 +190,7 @@ function PetCard({ pet, isSelected, isEquipped, isOwned, coins, onSelect, onPurc
           {isOwned && !isEquipped && (
             <button
               style={{ ...actionBtnStyle, background: '#4e9af1', color: '#fff', cursor: 'pointer' }}
-              onClick={() => onEquip(pet)}
+              onClick={(e) => { e.stopPropagation(); onEquip(pet); }}
             >
               장착하기
             </button>
@@ -200,7 +198,7 @@ function PetCard({ pet, isSelected, isEquipped, isOwned, coins, onSelect, onPurc
           {isOwned && isEquipped && (
             <button
               style={{ ...actionBtnStyle, background: 'rgba(220,53,69,0.85)', color: '#fff', cursor: 'pointer' }}
-              onClick={() => onUnequip(pet)}
+              onClick={(e) => { e.stopPropagation(); onUnequip(pet); }}
             >
               장착 해제
             </button>
