@@ -227,6 +227,8 @@ function mapPost(post, viewerId, publicBase) {
   let userDto;
   if (hideAuthor || !rawUser) {
     userDto = { user_id: 0, nickname: '익명', avatar_url: null };
+  } else if (rawUser.is_deleted) {
+    userDto = { user_id: 0, nickname: '탈퇴한 사용자', avatar_url: null };
   } else {
     userDto = {
       user_id: rawUser.user_id,
@@ -273,7 +275,7 @@ function mapPost(post, viewerId, publicBase) {
 }
 
 const postListInclude = (viewerId) => ({
-  user: { select: { user_id: true, nickname: true, avatar_url: true } },
+  user: { select: { user_id: true, nickname: true, avatar_url: true, is_deleted: true } },
   images: { orderBy: { display_order: 'asc' } },
   post_hashtags: { include: { hashtag: { select: { name: true } } } },
   ...(viewerId

@@ -101,19 +101,18 @@ async function githubCallback(req, res) {
       });
       isNew = true;
     } else {
-      // 기존 유저: 탈퇴 여부 확인
-      if (user.is_deleted) {
-        return res.redirect(`${FRONTEND_URL}/?error=account_deleted`);
-      }
-      // 재로그인 시 GitHub 프로필 사진만 동기화
+      // 기존 유저: 탈퇴 시 재가입 처리, 아니면 프로필 동기화
+      const wasDeleted = user.is_deleted;
       user = await prisma.user.update({
         where: { user_id: user.user_id },
         data: {
           avatar_url: githubUser.avatar_url,
           github_access_token: githubAccessToken,
           github_login: githubUser.login || null,
+          ...(wasDeleted ? { is_deleted: false, deleted_at: null, is_setup_complete: false } : {}),
         },
       });
+      if (wasDeleted) isNew = true;
     }
 
     // 4. JWT 토큰 발급
@@ -182,11 +181,17 @@ async function refreshAccessToken(req, res) {
 }
 
 // POST /api/auth/logout
-// 로그아웃: Refresh Token 무효화 + 쿠키 삭제
+// 로그아웃: Refresh Token 무효화 + 쿠키 삭제 + GitHub OAuth grant revoke
 async function logout(req, res) {
   const refreshToken = req.cookies.refresh_token;
 
-  res.clearCookie('refresh_token', { path: '/' });
+  // 쿠키 설정 시와 동일한 옵션으로 삭제해야 브라우저가 제대로 제거함
+  res.clearCookie('refresh_token', {
+    httpOnly: true,
+    secure: process.env.COOKIE_SECURE === 'true',
+    sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+    path: '/',
+  });
 
   if (refreshToken) {
     try {
@@ -197,6 +202,27 @@ async function logout(req, res) {
     } catch (err) {
       console.error('[Logout DB Error]', err.message);
     }
+  }
+
+  // GitHub OAuth grant revoke — 다음 로그인 시 GitHub 로그인 + 앱 승인을 다시 요구
+  try {
+    const user = await prisma.user.findUnique({
+      where: { user_id: req.user.userId },
+      select: { github_access_token: true },
+    });
+    if (user?.github_access_token) {
+      await axios.delete(
+        `https://api.github.com/applications/${GITHUB_CLIENT_ID}/grant`,
+        {
+          auth: { username: GITHUB_CLIENT_ID, password: GITHUB_CLIENT_SECRET },
+          data: { access_token: user.github_access_token },
+          headers: { Accept: 'application/vnd.github+json' },
+        }
+      );
+    }
+  } catch (err) {
+    // revoke 실패해도 로그아웃은 정상 처리
+    console.error('[GitHub Revoke Error]', err.message);
   }
 
   res.json({ message: '로그아웃 완료' });
@@ -321,4 +347,33 @@ async function completeSetup(req, res) {
   }
 }
 
-module.exports = { redirectToGithub, githubCallback, refreshAccessToken, logout, getMe, completeSetup };
+// DELETE /api/auth/me
+// 회원탈퇴: is_deleted = true 처리 + refresh token 전부 무효화 + 쿠키 삭제
+async function withdrawAccount(req, res) {
+  try {
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { user_id: req.user.userId },
+        data: { is_deleted: true, deleted_at: new Date() },
+      }),
+      prisma.refreshToken.updateMany({
+        where: { user_id: req.user.userId },
+        data: { is_revoked: true },
+      }),
+    ]);
+
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: process.env.COOKIE_SECURE === 'true',
+      sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+      path: '/',
+    });
+
+    res.json({ message: '회원탈퇴 완료' });
+  } catch (err) {
+    console.error('[Withdraw Error]', err.message);
+    res.status(500).json({ message: '서버 오류가 발생했습니다.' });
+  }
+}
+
+module.exports = { redirectToGithub, githubCallback, refreshAccessToken, logout, getMe, completeSetup, withdrawAccount };
