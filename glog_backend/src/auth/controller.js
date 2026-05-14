@@ -295,6 +295,25 @@ async function completeSetup(req, res) {
       }),
     ]);
 
+    // 지구본에 새 유저 실시간 반영
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('globe:user_joined', {
+        id: user.user_id,
+        name: user.nickname,
+        bio: bio?.slice(0, 100) || '',
+        avatar: user.model_url,
+        avatar_url: user.avatar_url,
+        pet_url: null,
+        lat,
+        lon,
+        country: country || null,
+        tech_stacks: stackList,
+        status: 'offline',
+        color: '#4e9af1',
+      });
+    }
+
     res.json({ message: '초기 설정 완료', globe_lat: lat, globe_lon: lon });
   } catch (err) {
     console.error('[Setup Error]', err.message);

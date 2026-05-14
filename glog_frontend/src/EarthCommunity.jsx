@@ -906,6 +906,20 @@ export default function EarthCommunity() {
       .catch((err) => console.error('[GlobeUsers]', err));
   }, []);
 
+  // 새 유저 가입 시 지구본에 실시간 추가
+  useEffect(() => {
+    const socket = getAppSocket();
+    if (!socket) return;
+    const onUserJoined = (newUser) => {
+      setApiGlobeUsers((prev) => {
+        if (prev.some((u) => Number(u.id) === Number(newUser.id))) return prev;
+        return [...prev, newUser];
+      });
+    };
+    socket.on('globe:user_joined', onUserJoined);
+    return () => socket.off('globe:user_joined', onUserJoined);
+  }, []);
+
   // 하루 첫 로그인 보상 요청 (로그인 유저가 확인된 시점에 1회만 실행)
   useEffect(() => {
     if (!me?.user_id) return;
@@ -947,6 +961,7 @@ export default function EarthCommunity() {
       color: "#4e9af1",
       avatar: me.model_url || pickAvatarByUserId(me.user_id),
       avatar_url: me.avatar_url || null,
+      pet_url: me.pet_url ?? null,
       isMe: true,
       status: me.status || "offline",
     };
@@ -964,6 +979,7 @@ export default function EarthCommunity() {
       color: "#4e9af1",
       avatar: me.model_url || pickAvatarByUserId(me.user_id),
       avatar_url: me.avatar_url || null,
+      pet_url: me.pet_url ?? null,
       lat,
       lon,
       status: me.status || "online",
@@ -1702,6 +1718,7 @@ export default function EarthCommunity() {
                     color: '#4e9af1',
                     avatar: me.model_url || pickAvatarByUserId(me.user_id),
                     avatar_url: me.avatar_url,
+                    pet_url: me.pet_url ?? null,
                     lat,
                     lon,
                     status: me.status || 'offline',

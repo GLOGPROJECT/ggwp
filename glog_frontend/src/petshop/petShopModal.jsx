@@ -5,24 +5,26 @@
  * - 투명도 70%, 상단 nav(z-index:100)를 가리지 않도록 z-index:90
  */
 
-import { useState, useEffect, Component, Suspense, useRef, useMemo } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { useGLTF, Center, Html } from '@react-three/drei';
+import { useState, useEffect, Component, Suspense, useRef, useMemo, useLayoutEffect } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { useGLTF, Center, Html, useAnimations } from '@react-three/drei';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils';
 import { useAuth } from '../auth/hooks/useAuth';
+import api from '../api/axios';
 
 // ──────────────────────────────────────────────────────────────────
-// 펫 데이터 (토끼X2, 개구리, 펭구, 자전거, 치킨, 여우)
+// shop_item_id → 표시 설정
 // ──────────────────────────────────────────────────────────────────
-const PETS = [
-  { id: 1, name: '토끼X2', emoji: '🐰', url: 'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/bunny_gltf.glb', price: 600 },
-  { id: 2, name: '개구리', emoji: '🐸', url: 'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/FROGG.glb',      price: 600 },
-  { id: 3, name: '펭구',   emoji: '🐧', url: 'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/penguin.glb',    price: 650 },
-  { id: 4, name: '자전거', emoji: '🚲', url: 'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/Bike.glb',       price: 500 },
-  { id: 5, name: '치킨',   emoji: '🐔', url: 'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/chicken.glb',   price: 500 },
-  { id: 6, name: '여우',   emoji: '🦊', url: 'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/Fox_GLB.glb',   price: 700 },
-];
+const PET_META = {
+  1: { emoji: '🐰', scale: 0.3 },
+  2: { emoji: '🐸', scale: 0.4, rotation: [0, -Math.PI / 2, 0] },
+  3: { emoji: '🐧', scale: 1 },
+  4: { emoji: '🚲', scale: 1 },
+  5: { emoji: '🐔', scale: 1 },
+  6: { emoji: '🦊', scale: 1 },
+};
 
-// S3에 존재하는 GLB만 preload
+// S3에 존재하는 GLB preload
 const PRELOAD_URLS = [
   'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/bunny_gltf.glb',
   'https://glogs3bucketforimage.s3.ap-northeast-2.amazonaws.com/pet/FROGG.glb',
@@ -33,7 +35,7 @@ const PRELOAD_URLS = [
 PRELOAD_URLS.forEach((u) => useGLTF.preload(u));
 
 // ──────────────────────────────────────────────────────────────────
-// 에러 바운더리 (GLB 로드 실패 시 이모지 폴백)
+// 에러 바운더리
 // ──────────────────────────────────────────────────────────────────
 class CanvasErrorBoundary extends Component {
   state = { error: false };
@@ -50,65 +52,162 @@ class CanvasErrorBoundary extends Component {
   }
 }
 
+class R3FErrorBoundary extends Component {
+  state = { error: false };
+  static getDerivedStateFromError() { return { error: true }; }
+  render() {
+    if (this.state.error) return null;
+    return this.props.children;
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────
-// 3D 모델 회전 컴포넌트
+// 카메라 lookAt 고정
 // ──────────────────────────────────────────────────────────────────
-function PetModel({ url }) {
+function CameraSetup({ y = 0.85 }) {
+  const { camera } = useThree();
+  useLayoutEffect(() => {
+    camera.lookAt(0, y, 0);
+    camera.updateProjectionMatrix();
+  }, [camera, y]);
+  return null;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// 내 아바타 (idle 애니메이션)
+// ──────────────────────────────────────────────────────────────────
+function MyAvatarModel({ url, scale = 1 }) {
+  const { scene, animations } = useGLTF(url);
+  const cloned = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const rootRef = useRef();
+  const { actions, names } = useAnimations(animations, rootRef);
+
+  useEffect(() => {
+    if (!names.length) return;
+    const idle = actions[names[1]] ?? actions[names[0]];
+    if (idle) idle.reset().fadeIn(0.3).play();
+    return () => { idle?.stop(); };
+  }, [actions, names]);
+
+  return <primitive ref={rootRef} object={cloned} rotation={[0, 0, 0]} scale={scale} />;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// 펫 3D 모델 (회전 없음)
+// ──────────────────────────────────────────────────────────────────
+function PetModel({ url, scale = 1, rotation = [0, 0, 0] }) {
   const { scene } = useGLTF(url);
   const cloned = useMemo(() => scene.clone(true), [scene]);
-  const ref = useRef();
-  useFrame((_, delta) => {
-    if (ref.current) ref.current.rotation.y += delta * 0.8;
-  });
   return (
     <Center>
-      <primitive ref={ref} object={cloned} />
+      <primitive object={cloned} scale={scale} rotation={rotation} />
     </Center>
   );
 }
 
 // ──────────────────────────────────────────────────────────────────
-// 선택된 펫 3D 미리보기
+// 아바타 + 선택된 펫 미리보기 (왼쪽 컬럼)
 // ──────────────────────────────────────────────────────────────────
-function PetPreview({ pet }) {
-  return (
-    <CanvasErrorBoundary emoji={pet.emoji}>
-      <div style={previewBoxStyle}>
-        <Canvas camera={{ position: [0, 0.5, 3], fov: 45 }}>
-          <ambientLight intensity={1.2} />
-          <directionalLight position={[3, 5, 3]} intensity={1.2} />
-          <Suspense fallback={
-            <Html center>
-              <span style={{ fontSize: 36 }}>{pet.emoji}</span>
-            </Html>
-          }>
-            <PetModel url={pet.url} />
-          </Suspense>
-        </Canvas>
+function MyAvatarPreview({ avatarUrl, pet }) {
+  if (!avatarUrl) {
+    return (
+      <div style={avatarFallbackStyle}>
+        <span style={{ fontSize: 40 }}>🧍</span>
       </div>
-    </CanvasErrorBoundary>
+    );
+  }
+  return (
+    <div style={avatarCanvasWrapStyle}>
+      <Canvas camera={{ position: [0, 0.75, 2.8], fov: 56 }} style={{ width: '100%', height: '100%' }}>
+        <CameraSetup y={0.75} />
+        <ambientLight intensity={0.7} />
+        <directionalLight position={[2, 5, 3]} intensity={1.2} />
+        <directionalLight position={[-2, 2, -2]} intensity={0.3} />
+        <Suspense fallback={null}>
+          <group position={pet?.image_url ? [-0.35, 0, 0] : [0, 0, 0]}>
+            <MyAvatarModel url={avatarUrl} scale={1.15} />
+          </group>
+        </Suspense>
+        {pet?.image_url && (
+          <R3FErrorBoundary key={pet.shop_item_id}>
+            <Suspense fallback={null}>
+              <group position={[0.5, 0, 0]} scale={0.45}>
+                <PetModel
+                  url={pet.image_url}
+                  scale={PET_META[pet.shop_item_id]?.scale ?? 1}
+                  rotation={PET_META[pet.shop_item_id]?.rotation ?? [0, 0, 0]}
+                />
+              </group>
+            </Suspense>
+          </R3FErrorBoundary>
+        )}
+      </Canvas>
+    </div>
   );
 }
 
 // ──────────────────────────────────────────────────────────────────
-// 펫 선택 카드 (그리드 아이템)
+// 펫 카드 (호버 시 구매/장착/해제 버튼 표시)
 // ──────────────────────────────────────────────────────────────────
-function PetCard({ pet, selected, canAfford, onClick }) {
+function PetCard({ pet, isSelected, isEquipped, isOwned, coins, onSelect, onPurchase, onEquip, onUnequip }) {
+  const meta = PET_META[pet.shop_item_id] ?? {};
+  const canAfford = coins >= pet.price;
+  const [hovered, setHovered] = useState(false);
+
   return (
-    <button
-      onClick={onClick}
+    <div
       style={{
         ...cardStyle,
-        outline: selected ? '2px solid #4e9af1' : '2px solid transparent',
-        background: selected ? 'rgba(78,154,241,0.22)' : 'rgba(255,255,255,0.10)',
+        outline: isSelected ? '2px solid #4e9af1' : '2px solid transparent',
+        background: isSelected ? 'rgba(78,154,241,0.22)' : 'rgba(255,255,255,0.10)',
+        position: 'relative',
       }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => onSelect(pet)}
     >
-      <span style={{ fontSize: 22 }}>{pet.emoji}</span>
+      <span style={{ fontSize: 22 }}>{meta.emoji ?? '🐾'}</span>
       <p style={cardNameStyle}>{pet.name}</p>
-      <p style={{ ...cardPriceStyle, color: canAfford ? '#ced4da' : '#868e96' }}>
-        🪙 {pet.price}
+      <p style={{ ...cardPriceStyle, color: canAfford || isOwned ? '#ced4da' : '#868e96' }}>
+        {isOwned ? (isEquipped ? '✅ 장착중' : '보유중') : `🪙 ${pet.price}`}
       </p>
-    </button>
+
+      {/* 호버 오버레이 */}
+      {hovered && (
+        <div style={hoverOverlayStyle} onClick={(e) => e.stopPropagation()}>
+          {!isOwned && (
+            <button
+              style={{
+                ...actionBtnStyle,
+                background: canAfford ? '#4e9af1' : 'rgba(134,142,150,0.35)',
+                color: canAfford ? '#fff' : '#868e96',
+                cursor: canAfford ? 'pointer' : 'not-allowed',
+              }}
+              disabled={!canAfford}
+              onClick={() => onPurchase(pet)}
+            >
+              구매하기
+            </button>
+          )}
+          {isOwned && !isEquipped && (
+            <button
+              style={{ ...actionBtnStyle, background: '#4e9af1', color: '#fff', cursor: 'pointer' }}
+              onClick={() => onEquip(pet)}
+            >
+              장착하기
+            </button>
+          )}
+          {isOwned && isEquipped && (
+            <button
+              style={{ ...actionBtnStyle, background: 'rgba(220,53,69,0.85)', color: '#fff', cursor: 'pointer' }}
+              onClick={() => onUnequip(pet)}
+            >
+              장착 해제
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -116,21 +215,74 @@ function PetCard({ pet, selected, canAfford, onClick }) {
 // 메인 모달
 // ──────────────────────────────────────────────────────────────────
 export default function PetShopModal({ onClose, navHeight = 80 }) {
-  const { user } = useAuth();
+  const { user, updateUser, refetchMe } = useAuth();
   const coins = user?.coins ?? 0;
-  const [selected, setSelected] = useState(PETS[0]);
+  const avatarUrl = user?.model_url ?? null;
+
+  const [pets, setPets] = useState([]);
+  const [selected, setSelected] = useState(null);
   const [visible, setVisible] = useState(false);
   const [closing, setClosing] = useState(false);
-  const canAfford = coins >= selected.price;
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setVisible(true));
     return () => cancelAnimationFrame(id);
   }, []);
 
+  // 상점 아이템 + 보유/장착 상태 로드
+  useEffect(() => {
+    api.get('/shop/items').then((res) => {
+      setPets(res.data);
+      const equipped = res.data.find((p) => p.equipped);
+      if (equipped) setSelected(equipped);
+      else if (res.data.length > 0) setSelected(res.data[0]);
+    }).catch((err) => {
+      console.error('[ShopItems Error]', err.message);
+    });
+  }, []);
+
   const handleClose = () => {
     setClosing(true);
     setTimeout(onClose, 320);
+  };
+
+  const handlePurchase = async (pet) => {
+    try {
+      await api.post(`/shop/items/${pet.shop_item_id}/purchase`);
+      const res = await api.get('/shop/items');
+      setPets(res.data);
+      const updated = res.data.find((p) => p.shop_item_id === pet.shop_item_id);
+      if (updated) setSelected(updated);
+      if (updateUser) updateUser({ coins: (user?.coins ?? 0) - pet.price });
+    } catch (err) {
+      alert(err.response?.data?.message ?? '구매 실패');
+    }
+  };
+
+  const handleEquip = async (pet) => {
+    try {
+      await api.patch(`/shop/items/${pet.shop_item_id}/equip`, { equip: true });
+      const res = await api.get('/shop/items');
+      setPets(res.data);
+      const updated = res.data.find((p) => p.shop_item_id === pet.shop_item_id);
+      if (updated) setSelected(updated);
+      refetchMe();
+    } catch (err) {
+      alert(err.response?.data?.message ?? '장착 실패');
+    }
+  };
+
+  const handleUnequip = async (pet) => {
+    try {
+      await api.patch(`/shop/items/${pet.shop_item_id}/equip`, { equip: false });
+      const res = await api.get('/shop/items');
+      setPets(res.data);
+      const updated = res.data.find((p) => p.shop_item_id === pet.shop_item_id);
+      if (updated) setSelected(updated);
+      refetchMe();
+    } catch (err) {
+      alert(err.response?.data?.message ?? '해제 실패');
+    }
   };
 
   return (
@@ -151,37 +303,33 @@ export default function PetShopModal({ onClose, navHeight = 80 }) {
         </div>
       </div>
 
-      {/* 선택된 펫 정보 + 구매 버튼 */}
-      <div style={selectedInfoStyle}>
-        <span style={{ fontSize: 28 }}>{selected.emoji}</span>
-        <div style={{ flex: 1 }}>
-          <p style={selectedNameStyle}>{selected.name}</p>
-          <p style={selectedPriceStyle}>🪙 {selected.price} 코인</p>
+      {/* 바디: 왼쪽 아바타 미리보기 + 오른쪽 펫 그리드 */}
+      <div style={bodyStyle}>
+        {/* 왼쪽: 아바타 + 선택 펫 미리보기 */}
+        <div style={avatarColStyle}>
+          <p style={avatarLabelStyle}>미리보기</p>
+          <MyAvatarPreview avatarUrl={avatarUrl} pet={selected} />
         </div>
-        <button
-          style={{
-            ...buyBtnStyle,
-            background: canAfford ? '#4e9af1' : 'rgba(134,142,150,0.35)',
-            color: canAfford ? '#fff' : '#868e96',
-            cursor: canAfford ? 'pointer' : 'not-allowed',
-          }}
-          disabled={!canAfford}
-        >
-          {canAfford ? '구매' : '부족'}
-        </button>
-      </div>
 
-      {/* 펫 선택 그리드 (3열 × 2행) */}
-      <div style={gridStyle}>
-        {PETS.map((pet) => (
-          <PetCard
-            key={pet.id}
-            pet={pet}
-            selected={selected.id === pet.id}
-            canAfford={coins >= pet.price}
-            onClick={() => setSelected(pet)}
-          />
-        ))}
+        {/* 오른쪽: 펫 그리드 */}
+        <div style={rightColStyle}>
+          <div style={gridStyle}>
+            {pets.map((pet) => (
+              <PetCard
+                key={pet.shop_item_id}
+                pet={pet}
+                isSelected={selected?.shop_item_id === pet.shop_item_id}
+                isEquipped={pet.equipped}
+                isOwned={pet.owned}
+                coins={coins}
+                onSelect={setSelected}
+                onPurchase={handlePurchase}
+                onEquip={handleEquip}
+                onUnequip={handleUnequip}
+              />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -191,15 +339,14 @@ export default function PetShopModal({ onClose, navHeight = 80 }) {
 // 스타일
 // ──────────────────────────────────────────────────────────────────
 
-/** 모달 본체: 화면 오른쪽, 30vw × 30vw 정사각형, 투명도 70% */
 const modalStyle = {
   position: 'fixed',
-  right: '10vw',
-  width: '30vw',
-  height: '30vw',
-  zIndex: 90,                                        // nav(100) 아래
+  right: '22vw',
+  width: '32vw',
+  height: '32vw',
+  zIndex: 90,
   borderRadius: 20,
-  background: 'rgba(15, 28, 54, 0.70)',              // 투명도 70%
+  background: 'rgba(15, 28, 54, 0.70)',
   backdropFilter: 'blur(14px)',
   WebkitBackdropFilter: 'blur(14px)',
   boxShadow: '0 8px 40px rgba(0,0,0,0.50)',
@@ -250,40 +397,56 @@ const closeBtnStyle = {
   padding: 0,
 };
 
-const selectedInfoStyle = {
+const bodyStyle = {
+  flex: 1,
+  display: 'flex',
+  gap: 10,
+  overflow: 'hidden',
+};
+
+const avatarColStyle = {
+  width: '55%',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  flexShrink: 0,
+};
+
+const avatarLabelStyle = {
+  margin: 0,
+  fontSize: '0.72vw',
+  fontWeight: 600,
+  color: '#9ab5e0',
+  textAlign: 'center',
+  letterSpacing: '0.3px',
+};
+
+const avatarCanvasWrapStyle = {
+  flex: 1,
+  borderRadius: 12,
+  overflow: 'hidden',
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(100,160,255,0.12)',
+};
+
+const avatarFallbackStyle = {
+  flex: 1,
+  borderRadius: 12,
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(100,160,255,0.12)',
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
-  background: 'rgba(255,255,255,0.08)',
-  borderRadius: 12,
-  padding: '6px 10px',
-  flexShrink: 0,
+  justifyContent: 'center',
 };
 
-const selectedNameStyle = {
-  margin: 0,
-  fontSize: '0.9vw',
-  fontWeight: 700,
-  color: '#f1f3f5',
+const rightColStyle = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  overflow: 'hidden',
 };
 
-const selectedPriceStyle = {
-  margin: 0,
-  fontSize: '0.75vw',
-  color: '#adb5bd',
-};
-
-const buyBtnStyle = {
-  padding: '5px 12px',
-  borderRadius: 8,
-  border: 'none',
-  fontWeight: 700,
-  fontSize: '0.8vw',
-  transition: 'background 0.15s',
-  flexShrink: 0,
-};
-
-/** 3열 × 2행 그리드 */
 const gridStyle = {
   flex: 1,
   display: 'grid',
@@ -318,12 +481,25 @@ const cardPriceStyle = {
   fontWeight: 500,
 };
 
-const previewBoxStyle = {
-  width: '100%',
-  height: '100%',
+const hoverOverlayStyle = {
+  position: 'absolute',
+  inset: 0,
   borderRadius: 10,
-  overflow: 'hidden',
-  background: 'rgba(255,255,255,0.06)',
+  background: 'rgba(10,20,40,0.82)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 4,
+};
+
+const actionBtnStyle = {
+  padding: '4px 10px',
+  borderRadius: 7,
+  border: 'none',
+  fontWeight: 700,
+  fontSize: '0.7vw',
+  transition: 'background 0.15s',
 };
 
 const previewFallbackStyle = {

@@ -1,7 +1,8 @@
-import React, { useRef, useEffect, useLayoutEffect, useMemo, useState, Suspense } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useMemo, useState, Suspense, Component } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { useGLTF, useAnimations } from '@react-three/drei';
+import { useGLTF, useAnimations, Center } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
+import { PET_META_BY_URL } from '../petshop/petMeta';
 
 const AVATAR_POOL = [
   '/models/avatar/f_1.glb',
@@ -33,24 +34,45 @@ function AvatarViewer({ url, scale, rotationY }) {
     return () => { idleAction?.stop(); };
   }, [actions, names]);
 
+  return <primitive ref={rootRef} object={cloned} scale={scale} rotation={[0, rotationY, 0]} />;
+}
+
+/** 펫 3D 모델 */
+function PetViewer({ url }) {
+  const meta = PET_META_BY_URL[url] ?? {};
+  const { scene } = useGLTF(url);
+  const cloned = useMemo(() => scene.clone(true), [scene]);
   return (
-    <primitive
-      ref={rootRef}
-      object={cloned}
-      scale={scale}
-      rotation={[0, rotationY, 0]}
-    />
+    <group position={[0.9, 0, 0]} scale={0.45}>
+      <Center>
+        <primitive
+          object={cloned}
+          scale={meta.scale ?? 1}
+          rotation={meta.rotation ?? [0, 0, 0]}
+          position={[0, 0, -0.5]}
+        />
+      </Center>
+    </group>
   );
 }
 
+class PetErrorBoundary extends Component {
+  state = { error: false };
+  static getDerivedStateFromError() { return { error: true }; }
+  render() {
+    if (this.state.error) return null;
+    return this.props.children;
+  }
+}
+
 /** 캐릭터 수직 중앙(y≈0.85)을 바라보도록 카메라 고정 */
-function CameraSetup() {
+function CameraSetup({ hasPet }) {
   const { camera } = useThree();
   useLayoutEffect(() => {
     camera.position.set(0, 0.85, 3.2);
-    camera.lookAt(0, 0.85, 0);
+    camera.lookAt(hasPet ? 0.35 : 0, 0.85, 0);
     camera.updateProjectionMatrix();
-  }, [camera]);
+  }, [camera, hasPet]);
   return null;
 }
 
@@ -202,6 +224,7 @@ export default function AvatarViewerModal({ user }) {
   const [modelScale, setModelScale] = useState(1.0);
   const [rotY, setRotY] = useState(0);
   const modelUrl = user?.avatar || user?.model_url || pickAvatarByUserId(user?.id);
+  const petUrl = user?.pet_url ?? null;
 
   // 유저가 바뀔 때 슬라이더 초기화
   useEffect(() => {
@@ -226,14 +249,19 @@ export default function AvatarViewerModal({ user }) {
             camera={{ position: [0, 0.85, 3.2], fov: 48 }}
             style={{ width: '100%', height: '100%' }}
           >
-            <CameraSetup />
+            <CameraSetup hasPet={!!petUrl} />
             <Lights />
             <Suspense fallback={null}>
-              <AvatarViewer
-                url={modelUrl}
-                scale={modelScale}
-                rotationY={rotY * (Math.PI / 180)}
-              />
+              <group scale={modelScale} rotation={[0, rotY * (Math.PI / 180), 0]}>
+                <AvatarViewer url={modelUrl} scale={1} rotationY={0} />
+                {petUrl && (
+                  <PetErrorBoundary key={petUrl}>
+                    <Suspense fallback={null}>
+                      <PetViewer url={petUrl} />
+                    </Suspense>
+                  </PetErrorBoundary>
+                )}
+              </group>
             </Suspense>
           </Canvas>
         </div>
