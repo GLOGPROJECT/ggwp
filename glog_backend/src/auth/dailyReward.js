@@ -32,12 +32,29 @@ async function claimDailyReward(req, res) {
       return res.json({ rewarded: false, coins: user.coins });
     }
 
-    const updated = await prisma.user.update({
-      where: { user_id: userId },
+    // updateMany + WHERE 조건으로 원자적 처리 → 동시 요청이 와도 1번만 지급
+    const result = await prisma.user.updateMany({
+      where: {
+        user_id: userId,
+        NOT: { last_login_reward_ymd: today },
+      },
       data: {
         coins: { increment: DAILY_LOGIN_REWARD },
         last_login_reward_ymd: today,
       },
+    });
+
+    // count === 0 이면 이미 다른 요청이 먼저 지급한 것
+    if (result.count === 0) {
+      const latest = await prisma.user.findUnique({
+        where: { user_id: userId },
+        select: { coins: true },
+      });
+      return res.json({ rewarded: false, coins: latest.coins });
+    }
+
+    const updated = await prisma.user.findUnique({
+      where: { user_id: userId },
       select: { coins: true },
     });
 

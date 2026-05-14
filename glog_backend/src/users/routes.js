@@ -89,6 +89,11 @@ router.get('/me/profile', authenticate, async (req, res) => {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
 
+    const equippedItem = await prisma.userItem.findFirst({
+      where: { user_id: req.user.userId, is_equipped: true },
+      include: { shop_item: { select: { image_url: true } } },
+    });
+
     res.json({
       user_id: user.user_id,
       nickname: user.nickname,
@@ -106,6 +111,7 @@ router.get('/me/profile', authenticate, async (req, res) => {
       status: user.user_status?.status ?? 'offline',
       include_private_contributions: user.include_private_contributions,
       has_github_token: Boolean(user.github_access_token),
+      pet_url: equippedItem?.shop_item?.image_url ?? null,
     });
   } catch (err) {
     console.error('[GetMyProfile Error]', err.message);
@@ -190,11 +196,23 @@ router.get('/globe', async (req, res) => {
       take: 100,
     });
 
+    // 장착된 펫 URL을 한 번에 조회
+    const userIds = users.map((u) => u.user_id);
+    const equippedItems = await prisma.userItem.findMany({
+      where: { user_id: { in: userIds }, is_equipped: true },
+      include: { shop_item: { select: { image_url: true } } },
+    });
+    const petMap = Object.fromEntries(
+      equippedItems.map((i) => [i.user_id, i.shop_item.image_url])
+    );
+
     res.json(users.map((u) => ({
       id: u.user_id,
       name: u.nickname,
       bio: u.bio || '',
+      avatar: u.model_url,
       avatar_url: u.avatar_url,
+      pet_url: petMap[u.user_id] ?? null,
       lat: parseFloat(u.globe_lat),
       lon: parseFloat(u.globe_lon),
       country: u.country,

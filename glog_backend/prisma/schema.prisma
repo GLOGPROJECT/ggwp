@@ -7,7 +7,443 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ===================== ENUMS =====================
+model User {
+  user_id                       Int                  @id @default(autoincrement())
+  github_id                     String               @unique @db.VarChar(50)
+  nickname                      String               @unique @db.VarChar(20)
+  avatar_url                    String?              @db.Text
+  email                         String?              @db.VarChar(255)
+  bio                           String?              @db.VarChar(100)
+  country                       String?              @db.VarChar(100)
+  globe_lat                     Decimal?             @db.Decimal(9, 6)
+  globe_lon                     Decimal?             @db.Decimal(9, 6)
+  coins                         Int                  @default(0)
+  is_private                    Boolean              @default(false)
+  is_deleted                    Boolean              @default(false)
+  created_at                    DateTime             @default(now())
+  updated_at                    DateTime             @updatedAt
+  is_setup_complete             Boolean              @default(false)
+  /// S3에 저장된 3D GLB 아바타 URL. 회원가입 시 랜덤 배정.
+  model_url                     String?              @db.VarChar(500)
+  /// GitHub OAuth 액세스 토큰(기여 동기화용). 운영 환경에서는 암호화 저장 권장.
+  github_access_token           String?              @db.Text
+  github_login                  String?              @db.VarChar(39)
+  include_private_contributions Boolean              @default(false)
+  last_streak_manual_refresh_at DateTime?
+  /// 일일 기여 코인 지급 기준일(UTC YYYY-MM-DD). 같은 날은 1회만.
+  last_daily_coin_ymd           String?              @db.VarChar(10)
+  /// 일일 첫 로그인 보상 지급일(KST YYYY-MM-DD). 같은 날은 1회만.
+  last_login_reward_ymd         String?              @db.VarChar(10)
+  blockers                      Block[]              @relation("Blocked")
+  blocking                      Block[]              @relation("Blocker")
+  coding_streak                 CodingStreak?
+  coin_histories                CoinHistory[]
+  comments                      Comment[]
+  contribution_days             ContributionDay[]
+  dm_messages                   DmMessage[]
+  sent_dm_rooms1                DmRoom[]             @relation("DmUser1")
+  sent_dm_rooms2                DmRoom[]             @relation("DmUser2")
+  following                     Follow[]             @relation("Follower")
+  followers                     Follow[]             @relation("Following")
+  sent_notifications            Notification[]       @relation("NotifSender")
+  notifications                 Notification[]       @relation("NotifReceiver")
+  post_likes                    PostLike[]
+  posts                         Post[]
+  project_comments              ProjectComment[]   @relation("ProjectCommentAuthor")
+  project_contributions         ProjectContributor[] @relation("ProjectContributorUser")
+  projects                      Project[]
+  refresh_tokens                RefreshToken[]
+  trophies                      Trophy[]
+  trophy_likes                  TrophyLike[]
+  user_achievements             UserAchievement[]
+  hashtag_subs                  UserHashtagSub[]
+  user_items                    UserItem[]
+  user_status                   UserStatus?
+  tech_stacks                   UserTechStack[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  token      String   @db.Text
+  expires_at DateTime
+  is_revoked Boolean  @default(false)
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id], map: "refresh_tokens_user_id_fkey")
+  @@map("refresh_tokens")
+}
+
+model UserTechStack {
+  id         Int    @id @default(autoincrement())
+  user_id    Int
+  stack_name String @db.VarChar(50)
+  user       User   @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id], map: "user_tech_stacks_user_id_fkey")
+  @@map("user_tech_stacks")
+}
+
+model UserStatus {
+  user_id        Int          @id
+  status         OnlineStatus @default(offline)
+  away_after_min Int          @default(10)
+  last_active_at DateTime     @default(now())
+  user           User         @relation(fields: [user_id], references: [user_id])
+
+  @@map("user_status")
+}
+
+model CodingStreak {
+  user_id            Int       @id
+  current_streak     Int       @default(0)
+  max_streak         Int       @default(0)
+  last_commit_date   DateTime?
+  today_commit_count Int       @default(0)
+  last_reset_date    DateTime?
+  user               User      @relation(fields: [user_id], references: [user_id])
+
+  @@map("coding_streaks")
+}
+
+/// GitHub 기여가 있었던 날(동기화 시 확정). 행은 삭제하지 않음(커밋 삭제 후에도 스트릭 인정).
+model ContributionDay {
+  user_id       Int
+  activity_date DateTime @db.Date
+  created_at    DateTime @default(now())
+  user          User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@id([user_id, activity_date])
+  @@map("contribution_days")
+}
+
+model CoinHistory {
+  coin_histories_id Int        @id @default(autoincrement())
+  user_id           Int
+  reason            CoinReason
+  amount            Int
+  created_at        DateTime   @default(now())
+  user              User       @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id], map: "coin_histories_user_id_fkey")
+  @@map("coin_histories")
+}
+
+model ShopItem {
+  shop_item_id Int          @id @default(autoincrement())
+  type         ShopItemType
+  name         String       @db.VarChar(100)
+  price        Int
+  image_url    String?      @db.VarChar(500)
+  is_active    Boolean      @default(true)
+  user_items   UserItem[]
+
+  @@map("shop_items")
+}
+
+model UserItem {
+  id           Int      @id @default(autoincrement())
+  user_id      Int
+  shop_item_id Int
+  is_equipped  Boolean  @default(false)
+  purchased_at DateTime @default(now())
+  shop_item    ShopItem @relation(fields: [shop_item_id], references: [shop_item_id])
+  user         User     @relation(fields: [user_id], references: [user_id])
+
+  @@unique([user_id, shop_item_id])
+  @@index([shop_item_id], map: "user_items_shop_item_id_fkey")
+  @@map("user_items")
+}
+
+model AchievementDefinition {
+  achievement_def_id Int                      @id @default(autoincrement())
+  code               String                   @db.VarChar(50)
+  name               String                   @db.VarChar(100)
+  description        String?                  @db.VarChar(255)
+  coin_reward        Int                      @default(0)
+  is_active          Boolean                  @default(true)
+  condition_type     AchievementConditionType
+  condition_value    Int
+  user_achievements  UserAchievement[]
+
+  @@map("achievement_definitions")
+}
+
+model UserAchievement {
+  user_id            Int
+  achievement_def_id Int
+  achieved_at        DateTime              @default(now())
+  achievement        AchievementDefinition @relation(fields: [achievement_def_id], references: [achievement_def_id])
+  user               User                  @relation(fields: [user_id], references: [user_id])
+
+  @@id([user_id, achievement_def_id])
+  @@index([achievement_def_id], map: "user_achievements_achievement_def_id_fkey")
+  @@map("user_achievements")
+}
+
+model Notification {
+  id           BigInt           @id @default(autoincrement())
+  user_id      Int
+  type         NotificationType
+  from_user_id Int?
+  reference_id Int?
+  is_read      Boolean          @default(false)
+  created_at   DateTime         @default(now())
+  from_user    User?            @relation("NotifSender", fields: [from_user_id], references: [user_id])
+  user         User             @relation("NotifReceiver", fields: [user_id], references: [user_id])
+
+  @@index([from_user_id], map: "notifications_from_user_id_fkey")
+  @@index([user_id], map: "notifications_user_id_fkey")
+  @@map("notifications")
+}
+
+model Follow {
+  follower_id  Int
+  following_id Int
+  created_at   DateTime @default(now())
+  follower     User     @relation("Follower", fields: [follower_id], references: [user_id])
+  following    User     @relation("Following", fields: [following_id], references: [user_id])
+
+  @@id([follower_id, following_id])
+  @@index([following_id], map: "follows_following_id_fkey")
+  @@map("follows")
+}
+
+model Block {
+  blocker_id Int
+  blocked_id Int
+  created_at DateTime @default(now())
+  blocked    User     @relation("Blocked", fields: [blocked_id], references: [user_id])
+  blocker    User     @relation("Blocker", fields: [blocker_id], references: [user_id])
+
+  @@id([blocker_id, blocked_id])
+  @@index([blocked_id], map: "blocks_blocked_id_fkey")
+  @@map("blocks")
+}
+
+model Post {
+  post_id                Int           @id @default(autoincrement())
+  content                String        @db.VarChar(5000)
+  type                   PostType      @default(public)
+  /// 익명 글 아바타(0~9). 일반/비밀 글은 null
+  anonymous_avatar_index Int?
+  is_deleted             Boolean       @default(false)
+  is_edited              Boolean       @default(false)
+  like_count             Int           @default(0)
+  created_at             DateTime      @default(now())
+  updated_at             DateTime      @updatedAt
+  deleted_at             DateTime?
+  comment_count          Int           @default(0)
+  user_id                Int?
+  engagement_score       Int           @default(0)
+  comments               Comment[]
+  post_hashtags          PostHashtag[]
+  images                 PostImage[]
+  likes                  PostLike[]
+  user                   User?         @relation(fields: [user_id], references: [user_id])
+
+  @@index([user_id], map: "posts_user_id_fkey")
+  @@map("posts")
+}
+
+model PostImage {
+  id            Int    @id @default(autoincrement())
+  image_url     String @db.VarChar(500)
+  display_order Int
+  post_id       Int
+  post          Post   @relation(fields: [post_id], references: [post_id])
+
+  @@index([post_id], map: "post_images_post_id_fkey")
+  @@map("post_images")
+}
+
+model PostLike {
+  user_id    Int
+  post_id    Int
+  created_at DateTime @default(now())
+  post       Post     @relation(fields: [post_id], references: [post_id])
+  user       User     @relation(fields: [user_id], references: [user_id])
+
+  @@id([user_id, post_id])
+  @@index([post_id], map: "post_likes_post_id_fkey")
+  @@map("post_likes")
+}
+
+model Comment {
+  id         Int       @id @default(autoincrement())
+  content    String    @db.VarChar(1000)
+  is_deleted Boolean   @default(false)
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+  user_id    Int?
+  post_id    Int
+  post       Post      @relation(fields: [post_id], references: [post_id])
+  user       User?     @relation(fields: [user_id], references: [user_id])
+
+  @@index([post_id], map: "comments_post_id_fkey")
+  @@index([user_id], map: "comments_user_id_fkey")
+  @@map("comments")
+}
+
+model Hashtag {
+  hashtag_id    Int              @id @default(autoincrement())
+  name          String           @unique @db.VarChar(100)
+  use_count     Int              @default(0)
+  created_at    DateTime         @default(now())
+  post_hashtags PostHashtag[]
+  hashtag_subs  UserHashtagSub[]
+
+  @@index([use_count])
+  @@map("hashtags")
+}
+
+model PostHashtag {
+  post_id    Int
+  hashtag_id Int
+  hashtag    Hashtag @relation(fields: [hashtag_id], references: [hashtag_id])
+  post       Post    @relation(fields: [post_id], references: [post_id])
+
+  @@id([post_id, hashtag_id])
+  @@index([hashtag_id], map: "post_hashtags_hashtag_id_fkey")
+  @@map("post_hashtags")
+}
+
+model UserHashtagSub {
+  id         Int      @id @default(autoincrement())
+  created_at DateTime @default(now())
+  user_id    Int
+  hashtag_id Int
+  hashtag    Hashtag  @relation(fields: [hashtag_id], references: [hashtag_id])
+  user       User     @relation(fields: [user_id], references: [user_id])
+
+  @@unique([user_id, hashtag_id])
+  @@index([hashtag_id], map: "user_hashtagsubs_hashtag_id_fkey")
+  @@map("user_hashtagsubs")
+}
+
+model DmRoom {
+  id         Int         @id @default(autoincrement())
+  user1_id   Int
+  user2_id   Int
+  created_at DateTime    @default(now())
+  messages   DmMessage[]
+  user1      User        @relation("DmUser1", fields: [user1_id], references: [user_id])
+  user2      User        @relation("DmUser2", fields: [user2_id], references: [user_id])
+
+  @@index([user1_id], map: "dm_rooms_user1_id_fkey")
+  @@index([user2_id], map: "dm_rooms_user2_id_fkey")
+  @@map("dm_rooms")
+}
+
+model DmMessage {
+  id         Int           @id @default(autoincrement())
+  room_id    Int
+  sender_id  Int
+  content    String?       @db.Text
+  file_url   String?       @db.Text
+  file_type  String?       @db.VarChar(20)
+  status     MessageStatus @default(sent)
+  is_deleted Boolean       @default(false)
+  created_at DateTime      @default(now())
+  room       DmRoom        @relation(fields: [room_id], references: [id])
+  sender     User          @relation(fields: [sender_id], references: [user_id])
+
+  @@index([room_id], map: "dm_messages_room_id_fkey")
+  @@index([sender_id], map: "dm_messages_sender_id_fkey")
+  @@map("dm_messages")
+}
+
+model Project {
+  projects_id      Int                  @id @default(autoincrement())
+  user_id          Int
+  title            String               @db.VarChar(100)
+  description      String               @db.VarChar(500)
+  github_url       String?              @db.VarChar(500)
+  deploy_url       String?              @db.VarChar(500)
+  image_url        String?              @db.VarChar(500)
+  video_url        String?              @db.VarChar(500)
+  start_date       DateTime?            @db.Date
+  end_date         DateTime?            @db.Date
+  is_deleted       Boolean              @default(false)
+  created_at       DateTime             @default(now())
+  updated_at       DateTime             @updatedAt
+  project_comments ProjectComment[]
+  contributors     ProjectContributor[]
+  project_tags     ProjectTag[]
+  user             User                 @relation(fields: [user_id], references: [user_id])
+  trophy           Trophy?
+
+  @@index([user_id], map: "projects_user_id_fkey")
+  @@map("projects")
+}
+
+model ProjectContributor {
+  project_id Int
+  user_id    Int
+  created_at DateTime @default(now())
+  project    Project  @relation(fields: [project_id], references: [projects_id], onDelete: Cascade)
+  user       User     @relation("ProjectContributorUser", fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@id([project_id, user_id])
+  @@index([user_id], map: "idx_project_contributors_user")
+  @@map("project_contributors")
+}
+
+model ProjectTag {
+  project_tags_id Int     @id @default(autoincrement())
+  project_id      Int
+  tag_name        String  @db.VarChar(100)
+  project         Project @relation(fields: [project_id], references: [projects_id])
+
+  @@index([project_id], map: "project_tags_project_id_fkey")
+  @@map("project_tags")
+}
+
+model ProjectComment {
+  id         Int      @id @default(autoincrement())
+  project_id Int
+  user_id    Int
+  content    String   @db.VarChar(2000)
+  is_deleted Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  project Project @relation(fields: [project_id], references: [projects_id], onDelete: Cascade)
+  user    User    @relation("ProjectCommentAuthor", fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([project_id, created_at])
+  @@map("project_comments")
+}
+
+model Trophy {
+  trophies_id  Int          @id @default(autoincrement())
+  project_id   Int          @unique
+  user_id      Int
+  grade        TrophyGrade  @default(bronze)
+  like_count   Int          @default(0)
+  created_at   DateTime     @default(now())
+  project      Project      @relation(fields: [project_id], references: [projects_id])
+  user         User         @relation(fields: [user_id], references: [user_id])
+  trophy_likes TrophyLike[]
+
+  @@index([user_id], map: "trophies_user_id_fkey")
+  @@map("trophies")
+}
+
+model TrophyLike {
+  user_id    Int
+  trophy_id  Int
+  created_at DateTime @default(now())
+  trophy     Trophy   @relation(fields: [trophy_id], references: [trophies_id])
+  user       User     @relation(fields: [user_id], references: [user_id])
+
+  @@id([user_id, trophy_id])
+  @@index([trophy_id], map: "trophy_likes_trophy_id_fkey")
+  @@map("trophy_likes")
+}
+
 
 enum OnlineStatus {
   online
@@ -49,6 +485,7 @@ enum CoinReason {
   trophy_gold
   achievement
   daily_contribution
+  purchase
 }
 
 enum NotificationType {
@@ -70,446 +507,4 @@ enum AchievementConditionType {
   comment_count
   streak_days
   trophy_count
-}
-
-// ===================== MODELS =====================
-
-model User {
-  user_id           Int      @id @default(autoincrement())
-  github_id         String   @unique @db.VarChar(50)
-  nickname          String   @unique @db.VarChar(20)
-  avatar_url        String?  @db.Text
-  email             String?  @db.VarChar(255)
-  bio               String?  @db.VarChar(100)
-  country           String?  @db.VarChar(100)
-  globe_lat         Decimal? @db.Decimal(9, 6)
-  globe_lon         Decimal? @db.Decimal(9, 6)
-  coins             Int      @default(0)
-  is_private        Boolean  @default(false)
-  is_deleted        Boolean  @default(false)
-  is_setup_complete Boolean  @default(false)
-  /// GitHub OAuth 액세스 토큰(기여 동기화용). 운영 환경에서는 암호화 저장 권장.
-  github_access_token            String?   @db.Text
-  github_login                   String?   @db.VarChar(39)
-  include_private_contributions  Boolean   @default(false)
-  last_streak_manual_refresh_at  DateTime?
-  /// 일일 기여 코인 지급 기준일(UTC YYYY-MM-DD). 같은 날은 1회만.
-  last_daily_coin_ymd            String?   @db.VarChar(10)
-  /// 일일 첫 로그인 보상 지급일(KST YYYY-MM-DD). 같은 날은 1회만.
-  last_login_reward_ymd          String?   @db.VarChar(10)
-
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-
-  refresh_tokens     RefreshToken[]
-  tech_stacks        UserTechStack[]
-  user_status        UserStatus?
-  coding_streak      CodingStreak?
-  coin_histories     CoinHistory[]
-  user_items         UserItem[]
-  user_achievements  UserAchievement[]
-  posts              Post[]
-  comments           Comment[]
-  post_likes         PostLike[]
-  sent_dm_rooms1     DmRoom[]            @relation("DmUser1")
-  sent_dm_rooms2     DmRoom[]            @relation("DmUser2")
-  dm_messages        DmMessage[]
-  notifications      Notification[]      @relation("NotifReceiver")
-  sent_notifications Notification[]      @relation("NotifSender")
-  followers          Follow[]            @relation("Following")
-  following          Follow[]            @relation("Follower")
-  blockers           Block[]             @relation("Blocked")
-  blocking           Block[]             @relation("Blocker")
-  hashtag_subs       UserHashtagSub[]
-  projects           Project[]
-  trophies           Trophy[]
-  trophy_likes          TrophyLike[]
-  project_contributions ProjectContributor[] @relation("ProjectContributorUser")
-  contribution_days     ContributionDay[]
-  project_comments      ProjectComment[]      @relation("ProjectCommentAuthor")
-
-  @@map("users")
-}
-
-model RefreshToken {
-  id         Int      @id @default(autoincrement())
-  user_id    Int
-  token      String   @db.Text
-  expires_at DateTime
-  is_revoked Boolean  @default(false)
-  created_at DateTime @default(now())
-
-  user User @relation(fields: [user_id], references: [user_id])
-
-  @@map("refresh_tokens")
-}
-
-model UserTechStack {
-  id         Int    @id @default(autoincrement())
-  user_id    Int
-  stack_name String @db.VarChar(50)
-
-  user User @relation(fields: [user_id], references: [user_id])
-
-  @@map("user_tech_stacks")
-}
-
-model UserStatus {
-  user_id        Int          @id
-  status         OnlineStatus @default(offline)
-  away_after_min Int          @default(10)
-  last_active_at DateTime     @default(now())
-
-  user User @relation(fields: [user_id], references: [user_id])
-
-  @@map("user_status")
-}
-
-model CodingStreak {
-  user_id            Int       @id
-  current_streak     Int       @default(0)
-  max_streak         Int       @default(0)
-  last_commit_date   DateTime?
-  today_commit_count Int       @default(0) // 오늘 하루 커밋 횟수 (매일 자정 초기화)
-  last_reset_date    DateTime? // 마지막으로 today_commit_count가 초기화된 날짜
-
-  user User @relation(fields: [user_id], references: [user_id])
-
-  @@map("coding_streaks")
-}
-
-/// GitHub 기여가 있었던 날(동기화 시 확정). 행은 삭제하지 않음(커밋 삭제 후에도 스트릭 인정).
-model ContributionDay {
-  user_id       Int
-  activity_date DateTime @db.Date
-  created_at    DateTime @default(now())
-
-  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@id([user_id, activity_date])
-  @@map("contribution_days")
-}
-
-model CoinHistory {
-  coin_histories_id Int        @id @default(autoincrement())
-  user_id           Int
-  reason            CoinReason
-  amount            Int
-  created_at        DateTime   @default(now())
-
-  user User @relation(fields: [user_id], references: [user_id])
-
-  @@map("coin_histories")
-}
-
-model ShopItem {
-  shop_item_id Int          @id @default(autoincrement())
-  type         ShopItemType
-  name         String       @db.VarChar(100)
-  price        Int
-  image_url    String?      @db.VarChar(500)
-  is_active    Boolean      @default(true)
-
-  user_items UserItem[]
-
-  @@map("shop_items")
-}
-
-model UserItem {
-  id           Int      @id @default(autoincrement())
-  user_id      Int
-  shop_item_id Int
-  is_equipped  Boolean  @default(false)
-  purchased_at DateTime @default(now())
-
-  user      User     @relation(fields: [user_id], references: [user_id])
-  shop_item ShopItem @relation(fields: [shop_item_id], references: [shop_item_id])
-
-  @@unique([user_id, shop_item_id])
-  @@map("user_items")
-}
-
-model AchievementDefinition {
-  achievement_def_id Int                      @id @default(autoincrement())
-  code               String                   @db.VarChar(50)
-  name               String                   @db.VarChar(100)
-  description        String?                  @db.VarChar(255)
-  coin_reward        Int                      @default(0)
-  is_active          Boolean                  @default(true)
-  condition_type     AchievementConditionType
-  condition_value    Int
-
-  user_achievements UserAchievement[]
-
-  @@map("achievement_definitions")
-}
-
-model UserAchievement {
-  user_id            Int
-  achievement_def_id Int
-  achieved_at        DateTime @default(now())
-
-  user        User                  @relation(fields: [user_id], references: [user_id])
-  achievement AchievementDefinition @relation(fields: [achievement_def_id], references: [achievement_def_id])
-
-  @@id([user_id, achievement_def_id])
-  @@map("user_achievements")
-}
-
-model Notification {
-  id           BigInt           @id @default(autoincrement())
-  user_id      Int
-  type         NotificationType
-  from_user_id Int?
-  reference_id Int?
-  is_read      Boolean          @default(false)
-  created_at   DateTime         @default(now())
-
-  user      User  @relation("NotifReceiver", fields: [user_id], references: [user_id])
-  from_user User? @relation("NotifSender", fields: [from_user_id], references: [user_id])
-
-  @@map("notifications")
-}
-
-model Follow {
-  follower_id  Int
-  following_id Int
-  created_at   DateTime @default(now())
-
-  follower  User @relation("Follower", fields: [follower_id], references: [user_id])
-  following User @relation("Following", fields: [following_id], references: [user_id])
-
-  @@id([follower_id, following_id])
-  @@map("follows")
-}
-
-model Block {
-  blocker_id Int
-  blocked_id Int
-  created_at DateTime @default(now())
-
-  blocker User @relation("Blocker", fields: [blocker_id], references: [user_id])
-  blocked User @relation("Blocked", fields: [blocked_id], references: [user_id])
-
-  @@id([blocker_id, blocked_id])
-  @@map("blocks")
-}
-
-model Post {
-  post_id       Int      @id @default(autoincrement())
-  user_id       Int?
-  content       String   @db.VarChar(5000)
-  type          PostType @default(public)
-  /// 익명 글 아바타(0~9). 일반/비밀 글은 null
-  anonymous_avatar_index Int?
-  is_deleted    Boolean  @default(false)
-  is_edited     Boolean  @default(false)
-  like_count    Int      @default(0)
-  comment_count Int      @default(0)
-  /// 인기 피드 정렬용: like_count + comment_count (좋아요/댓글 변경 시 동기화)
-  engagement_score Int @default(0)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-  deleted_at    DateTime?
-
-  user        User?        @relation(fields: [user_id], references: [user_id])
-  images      PostImage[]
-  likes       PostLike[]
-  comments    Comment[]
-  post_hashtags PostHashtag[]
-
-  @@map("posts")
-}
-
-model PostImage {
-  id            Int    @id @default(autoincrement())
-  post_id       Int
-  image_url     String @db.VarChar(500)
-  display_order Int
-
-  post Post @relation(fields: [post_id], references: [post_id])
-
-  @@map("post_images")
-}
-
-model PostLike {
-  user_id    Int
-  post_id    Int
-  created_at DateTime @default(now())
-
-  user User @relation(fields: [user_id], references: [user_id])
-  post Post @relation(fields: [post_id], references: [post_id])
-
-  @@id([user_id, post_id])
-  @@map("post_likes")
-}
-
-model Comment {
-  id         Int       @id @default(autoincrement())
-  post_id    Int
-  user_id    Int?
-  content    String    @db.VarChar(1000)
-  is_deleted Boolean   @default(false)
-  created_at DateTime  @default(now())
-  deleted_at DateTime?
-
-  post Post  @relation(fields: [post_id], references: [post_id])
-  user User? @relation(fields: [user_id], references: [user_id])
-
-  @@map("comments")
-}
-
-model Hashtag {
-  hashtag_id Int      @id @default(autoincrement())
-  name       String   @unique @db.VarChar(100)
-  use_count  Int      @default(0)
-  created_at DateTime @default(now())
-
-  post_hashtags  PostHashtag[]
-  hashtag_subs   UserHashtagSub[]
-
-  @@index([use_count])
-  @@map("hashtags")
-}
-
-model PostHashtag {
-  post_id    Int
-  hashtag_id Int
-
-  post    Post    @relation(fields: [post_id], references: [post_id])
-  hashtag Hashtag @relation(fields: [hashtag_id], references: [hashtag_id])
-
-  @@id([post_id, hashtag_id])
-  @@map("post_hashtags")
-}
-
-model UserHashtagSub {
-  id         Int      @id @default(autoincrement())
-  user_id    Int
-  hashtag_id Int
-  created_at DateTime @default(now())
-
-  user    User    @relation(fields: [user_id], references: [user_id])
-  hashtag Hashtag @relation(fields: [hashtag_id], references: [hashtag_id])
-
-  @@unique([user_id, hashtag_id])
-  @@map("user_hashtagsubs")
-}
-
-model DmRoom {
-  id         Int      @id @default(autoincrement())
-  user1_id   Int
-  user2_id   Int
-  created_at DateTime @default(now())
-
-  user1    User        @relation("DmUser1", fields: [user1_id], references: [user_id])
-  user2    User        @relation("DmUser2", fields: [user2_id], references: [user_id])
-  messages DmMessage[]
-
-  @@map("dm_rooms")
-}
-
-model DmMessage {
-  id         Int           @id @default(autoincrement())
-  room_id    Int
-  sender_id  Int
-  content    String?       @db.Text
-  file_url   String?       @db.Text
-  file_type  String?       @db.VarChar(20)
-  status     MessageStatus @default(sent)
-  is_deleted Boolean       @default(false)
-  created_at DateTime      @default(now())
-
-  room   DmRoom @relation(fields: [room_id], references: [id])
-  sender User   @relation(fields: [sender_id], references: [user_id])
-
-  @@map("dm_messages")
-}
-
-model Project {
-  projects_id Int       @id @default(autoincrement())
-  user_id     Int
-  title       String    @db.VarChar(100)
-  description String    @db.VarChar(500)
-  github_url  String?   @db.VarChar(500)
-  deploy_url  String?   @db.VarChar(500)
-  image_url   String?   @db.VarChar(500)
-  video_url   String?   @db.VarChar(500)
-  start_date  DateTime? @db.Date
-  end_date    DateTime? @db.Date
-  is_deleted  Boolean   @default(false)
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-
-  user         User          @relation(fields: [user_id], references: [user_id])
-  project_tags ProjectTag[]
-  trophy       Trophy?
-  contributors ProjectContributor[]
-  comments     ProjectComment[]
-
-  @@map("projects")
-}
-
-model ProjectContributor {
-  project_id Int
-  user_id    Int
-  created_at DateTime @default(now())
-
-  project Project @relation(fields: [project_id], references: [projects_id], onDelete: Cascade)
-  user    User    @relation("ProjectContributorUser", fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@id([project_id, user_id])
-  @@map("project_contributors")
-}
-
-model ProjectTag {
-  project_tags_id Int    @id @default(autoincrement())
-  project_id      Int
-  tag_name        String @db.VarChar(100)
-
-  project Project @relation(fields: [project_id], references: [projects_id])
-
-  @@map("project_tags")
-}
-
-model ProjectComment {
-  id         Int      @id @default(autoincrement())
-  project_id Int
-  user_id    Int
-  content    String   @db.VarChar(2000)
-  is_deleted Boolean  @default(false)
-  created_at DateTime @default(now())
-
-  project Project @relation(fields: [project_id], references: [projects_id], onDelete: Cascade)
-  user    User    @relation("ProjectCommentAuthor", fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@index([project_id, created_at])
-  @@map("project_comments")
-}
-
-model Trophy {
-  trophies_id Int        @id @default(autoincrement())
-  project_id  Int        @unique
-  user_id     Int
-  grade       TrophyGrade @default(bronze)
-  like_count  Int        @default(0)
-  created_at  DateTime   @default(now())
-
-  project      Project      @relation(fields: [project_id], references: [projects_id])
-  user         User         @relation(fields: [user_id], references: [user_id])
-  trophy_likes TrophyLike[]
-
-  @@map("trophies")
-}
-
-model TrophyLike {
-  user_id    Int
-  trophy_id  Int
-  created_at DateTime @default(now())
-
-  user   User   @relation(fields: [user_id], references: [user_id])
-  trophy Trophy @relation(fields: [trophy_id], references: [trophies_id])
-
-  @@id([user_id, trophy_id])
-  @@map("trophy_likes")
 }
