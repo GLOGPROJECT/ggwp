@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useLayoutEffect, useMemo, useState, Suspense } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useMemo, useState, Suspense, Component } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useGLTF, useAnimations, Center } from '@react-three/drei';
 import { SkeletonUtils } from 'three-stdlib';
@@ -19,8 +19,8 @@ function pickAvatarByUserId(userId) {
   return AVATAR_POOL[idx];
 }
 
-/** 뷰어 전용 아바타 — idle 애니메이션만 담당, scale/rotation은 부모 group에서 제어 */
-function AvatarViewer({ url }) {
+/** 뷰어 전용 아바타 — scale / rotationY 외부에서 제어 */
+function AvatarViewer({ url, scale, rotationY }) {
   const { scene, animations } = useGLTF(url);
   const cloned = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const rootRef = useRef();
@@ -28,15 +28,16 @@ function AvatarViewer({ url }) {
 
   useEffect(() => {
     if (!names.length) return;
+    // index 1 = idle (가만히 서있는 애니메이션)
     const idleAction = actions[names[1]] ?? actions[names[0]];
     if (idleAction) idleAction.reset().fadeIn(0.3).play();
     return () => { idleAction?.stop(); };
   }, [actions, names]);
 
-  return <primitive ref={rootRef} object={cloned} />;
+  return <primitive ref={rootRef} object={cloned} scale={scale} rotation={[0, rotationY, 0]} />;
 }
 
-/** 장착된 펫 3D 렌더링 */
+/** 펫 3D 모델 */
 function PetViewer({ url }) {
   const meta = PET_META_BY_URL[url] ?? {};
   const { scene } = useGLTF(url);
@@ -48,20 +49,28 @@ function PetViewer({ url }) {
           object={cloned}
           scale={meta.scale ?? 1}
           rotation={meta.rotation ?? [0, 0, 0]}
+          position={[0, 0, -0.5]}
         />
       </Center>
     </group>
   );
 }
 
+class PetErrorBoundary extends Component {
+  state = { error: false };
+  static getDerivedStateFromError() { return { error: true }; }
+  render() {
+    if (this.state.error) return null;
+    return this.props.children;
+  }
+}
+
 /** 캐릭터 수직 중앙(y≈0.85)을 바라보도록 카메라 고정 */
 function CameraSetup({ hasPet }) {
   const { camera } = useThree();
   useLayoutEffect(() => {
-    // 아바타는 항상 중앙(0,0,0), 펫이 있으면 lookAt을 살짝 오른쪽으로 이동
-    const lookX = hasPet ? 0.35 : 0;
     camera.position.set(0, 0.85, 3.2);
-    camera.lookAt(lookX, 0.85, 0);
+    camera.lookAt(hasPet ? 0.35 : 0, 0.85, 0);
     camera.updateProjectionMatrix();
   }, [camera, hasPet]);
   return null;
@@ -240,19 +249,20 @@ export default function AvatarViewerModal({ user }) {
             camera={{ position: [0, 0.85, 3.2], fov: 48 }}
             style={{ width: '100%', height: '100%' }}
           >
-            <CameraSetup hasPet={Boolean(petUrl)} />
+            <CameraSetup hasPet={!!petUrl} />
             <Lights />
-            {/* 아바타 + 펫을 하나의 그룹으로 묶어 크기/회전 동기화 */}
-            <group scale={modelScale} rotation={[0, rotY * (Math.PI / 180), 0]}>
-              <Suspense fallback={null}>
-                <AvatarViewer url={modelUrl} />
-              </Suspense>
-              {petUrl && (
-                <Suspense fallback={null}>
-                  <PetViewer url={petUrl} />
-                </Suspense>
-              )}
-            </group>
+            <Suspense fallback={null}>
+              <group scale={modelScale} rotation={[0, rotY * (Math.PI / 180), 0]}>
+                <AvatarViewer url={modelUrl} scale={1} rotationY={0} />
+                {petUrl && (
+                  <PetErrorBoundary key={petUrl}>
+                    <Suspense fallback={null}>
+                      <PetViewer url={petUrl} />
+                    </Suspense>
+                  </PetErrorBoundary>
+                )}
+              </group>
+            </Suspense>
           </Canvas>
         </div>
 
