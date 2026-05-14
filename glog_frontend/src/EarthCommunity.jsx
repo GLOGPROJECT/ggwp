@@ -953,12 +953,16 @@ export default function EarthCommunity() {
   }, [me?.user_id, updateUser]);
 
   const globeUsers = useMemo(() => {
-    const normalized = apiGlobeUsers.map((u) => ({
-      ...u,
-      avatar: u.avatar || u.model_url || pickAvatarByUserId(u.id),
-      // API 목록에 내 마킹이 있어도 isMe가 없으면 패널에서 팔로우로 잘못 표시됨
-      isMe: Boolean(me?.user_id != null && Number(u.id) === Number(me.user_id)),
-    }));
+    const normalized = apiGlobeUsers.map((u) => {
+      const isMe = Boolean(me?.user_id != null && Number(u.id) === Number(me.user_id));
+      return {
+        ...u,
+        avatar: u.avatar || u.model_url || pickAvatarByUserId(u.id),
+        isMe,
+        // 내 항목은 최신 me 데이터로 덮어써서 장착 펫 즉시 반영
+        ...(isMe ? { pet_url: me.pet_url ?? null } : {}),
+      };
+    });
     if (!me?.user_id) return normalized;
     // API 결과에 내가 없으면 직접 추가 (id는 숫자/문자열 모두 대응)
     const hasMe = normalized.some((u) => Number(u.id) === Number(me.user_id));
