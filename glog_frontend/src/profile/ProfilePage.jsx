@@ -22,7 +22,7 @@ const TECH_STACK_OPTIONS = [
 export default function ProfilePage() {
   const { userId } = useParams();
   const navigate = useNavigate();
-  const { user: me } = useAuth();
+  const { user: me, logout } = useAuth();
   const { theme, toggleTheme } = useFeedTheme();
 
   const [profile, setProfile] = useState(null);
@@ -38,6 +38,11 @@ export default function ProfilePage() {
   const [streakSyncing, setStreakSyncing] = useState(false);
   const [streakSyncMsg, setStreakSyncMsg] = useState(null);
   const [projectRegisterOpen, setProjectRegisterOpen] = useState(false);
+
+  // 회원탈퇴 모달 상태
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawAgreed, setWithdrawAgreed] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const isMyProfile = userId === 'me' || (me && me.user_id === parseInt(userId));
 
@@ -150,6 +155,20 @@ export default function ProfilePage() {
       setSaveError('저장에 실패했습니다. 다시 시도해주세요.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // 회원탈퇴 처리
+  const handleWithdraw = async () => {
+    if (!withdrawAgreed) return;
+    try {
+      setWithdrawing(true);
+      await api.delete('/auth/me');
+      await logout();
+      navigate('/', { replace: true });
+    } catch {
+      setWithdrawing(false);
+      alert('탈퇴 처리 중 오류가 발생했습니다. 다시 시도해주세요.');
     }
   };
 
@@ -284,6 +303,7 @@ export default function ProfilePage() {
 
         {/* ── 수정 모드 ── */}
         {isEditing ? (
+          <>
           <div style={styles.section}>
             {/* 자기소개 편집 */}
             <h3 style={styles.sectionTitle}>자기소개</h3>
@@ -335,7 +355,62 @@ export default function ProfilePage() {
                 취소
               </button>
             </div>
+
+            {/* 회원탈퇴 — 오른쪽 하단, 눈에 잘 안 띄게 */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 32 }}>
+              <button
+                onClick={() => { setWithdrawOpen(true); setWithdrawAgreed(false); }}
+                style={{ background: 'none', border: 'none', color: 'var(--feed-muted)', fontSize: '0.75rem', cursor: 'pointer', opacity: 0.5, padding: '4px 0' }}
+              >
+                회원탈퇴
+              </button>
+            </div>
           </div>
+
+          {/* 회원탈퇴 확인 모달 */}
+          {withdrawOpen && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ background: 'var(--feed-bg-card)', borderRadius: 12, padding: '32px 28px', maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
+                <h3 style={{ margin: '0 0 16px', color: 'var(--feed-text-primary)', fontSize: '1.1rem' }}>회원탈퇴</h3>
+
+                {/* 탈퇴 약관 */}
+                <div style={{ background: 'var(--feed-bg-page)', borderRadius: 8, padding: '14px 16px', fontSize: '0.82rem', color: 'var(--feed-muted)', lineHeight: 1.7, marginBottom: 20, maxHeight: 180, overflowY: 'auto' }}>
+                  <p style={{ margin: '0 0 8px', fontWeight: 600, color: 'var(--feed-text-primary)' }}>탈퇴 전 반드시 확인해주세요</p>
+                  <p style={{ margin: '0 0 6px' }}>• 탈퇴 시 계정 및 모든 데이터(프로필, 게시글, 댓글, 코인 등)가 즉시 비활성화됩니다.</p>
+                  <p style={{ margin: '0 0 6px' }}>• 탈퇴 후 동일한 GitHub 계정으로 재가입이 제한될 수 있습니다.</p>
+                  <p style={{ margin: '0 0 6px' }}>• 보유 중인 코인 및 트로피는 복구되지 않습니다.</p>
+                  <p style={{ margin: 0 }}>• 탈퇴 처리는 즉시 이루어지며 취소할 수 없습니다.</p>
+                </div>
+
+                {/* 동의 체크박스 */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--feed-text-primary)', marginBottom: 24, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={withdrawAgreed}
+                    onChange={(e) => setWithdrawAgreed(e.target.checked)}
+                  />
+                  위 내용을 모두 확인했으며, 탈퇴에 동의합니다.
+                </label>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setWithdrawOpen(false)}
+                    style={{ padding: '8px 20px', borderRadius: 6, border: '1px solid var(--feed-border)', background: 'none', color: 'var(--feed-text-primary)', cursor: 'pointer', fontSize: '0.9rem' }}
+                  >
+                    취소
+                  </button>
+                  <button
+                    onClick={handleWithdraw}
+                    disabled={!withdrawAgreed || withdrawing}
+                    style={{ padding: '8px 20px', borderRadius: 6, border: 'none', background: withdrawAgreed ? '#ef4444' : '#6b7280', color: 'white', cursor: withdrawAgreed ? 'pointer' : 'not-allowed', fontSize: '0.9rem', fontWeight: 600 }}
+                  >
+                    {withdrawing ? '처리 중...' : '탈퇴하기'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          </>
         ) : (
           /* ── 뷰 모드 ── */
           <>

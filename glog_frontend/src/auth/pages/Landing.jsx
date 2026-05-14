@@ -120,12 +120,13 @@ function HologramEarth({ size = 480 }) {
     // 대륙 외곽선 그룹 (GeoJSON 로드)
     const continentGroup = new THREE.Group();
     scene.add(continentGroup);
-    const continentMat = new THREE.LineBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.85 });
+    const continentMat = new THREE.LineBasicMaterial({ color: 0x00eedd, transparent: true, opacity: 0.85 });
 
     fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
       .then(res => res.json())
       .then(geojson => {
         geojson.features.forEach(feature => {
+
           const geom = feature.geometry;
           const polys = geom.type === 'Polygon' ? [geom.coordinates]
                       : geom.type === 'MultiPolygon' ? geom.coordinates : [];
@@ -229,7 +230,8 @@ export default function Landing() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const error = params.get('error');
-    if (error === 'access_denied') alert('GitHub 권한 동의가 거부되었습니다.');
+    if (error === 'account_deleted') alert('탈퇴한 계정입니다. 다른 GitHub 계정으로 로그인해주세요.');
+    else if (error === 'access_denied') alert('GitHub 권한 동의가 거부되었습니다.');
     else if (error === 'db_migration_required') {
       alert(
         'DB 스키마가 최신이 아닙니다. 백엔드에서 prisma/sql/add_daily_contribution_coin.sql 적용(또는 npx prisma db push) 후 다시 로그인해 주세요.',

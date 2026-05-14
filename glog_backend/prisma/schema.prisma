@@ -20,6 +20,7 @@ model User {
   coins                         Int                  @default(0)
   is_private                    Boolean              @default(false)
   is_deleted                    Boolean              @default(false)
+  deleted_at                    DateTime?
   created_at                    DateTime             @default(now())
   updated_at                    DateTime             @updatedAt
   is_setup_complete             Boolean              @default(false)

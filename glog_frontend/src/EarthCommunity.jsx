@@ -159,9 +159,19 @@ function parseGlobeCoord(raw, fallback) {
 // 2. GLTF 지구 모델 + 유저 마커들
 //    (자전과 마커가 같이 돌도록 한 group 안에 묶음)
 // ──────────────────────────────────────────────────────────────────
-function EarthScene({ users = [], autoRotate, onSelectUser, onSceneClick, dragRef, groupRef, profilePanelOpen }) {
+function EarthScene({ users = [], autoRotate, onSelectUser, onSceneClick, dragRef, groupRef, profilePanelOpen, onReady }) {
   const group = groupRef;
   const { scene } = useGLTF("/models/earth/scene.gltf");
+
+  // 아바타 로드 카운트 — 전체 유저 수만큼 로드되면 onReady 호출
+  const avatarLoadCountRef = useRef(0);
+  const handleAvatarLoad = useCallback(() => {
+    avatarLoadCountRef.current += 1;
+    if (avatarLoadCountRef.current >= users.length) onReady?.();
+  }, [users.length, onReady]);
+
+  // 유저가 없으면 바로 onReady
+  useEffect(() => { if (users.length === 0) onReady?.(); }, [users.length]);
 
   // GLTF 모델의 실제 반지름이 약 1 정도이므로 그대로 사용.
   // 마커는 표면에 살짝 띄워서 (1.02) 박히지 않게 한다.
@@ -206,6 +216,7 @@ function EarthScene({ users = [], autoRotate, onSelectUser, onSceneClick, dragRe
             user={u}
             profilePanelOpen={profilePanelOpen}
             onClick={() => onSelectUser(u)}
+            onAvatarLoad={handleAvatarLoad}
           />
         );
       })}
@@ -223,7 +234,7 @@ AVATAR_POOL.forEach((url) => useGLTF.preload(url));
 // ──────────────────────────────────────────────────────────────────
 
 // SkeletonUtils.clone: SkinnedMesh 스켈레톤까지 올바르게 복제
-function AvatarModel({ url }) {
+function AvatarModel({ url, onLoad }) {
   const { scene, animations } = useGLTF(url);
   const cloned = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const rootRef = useRef();
@@ -236,6 +247,9 @@ function AvatarModel({ url }) {
     return () => { idleAction?.stop(); };
   }, [actions, names]);
 
+  // 아바타 마운트 완료 시 onLoad 호출
+  useEffect(() => { onLoad?.(); }, []);
+
   return <primitive ref={rootRef} object={cloned} />;
 }
 
@@ -245,7 +259,7 @@ const MIN_SCALE = 0.3;       // 줌아웃 최소 (기본에서 14% 이상 멀어
 const MAX_SCALE = 2.0;       // 줌인 최대 2배 (기본에서 20% 가까워지면 도달)
 const AVATAR_BASE_SCALE = 0.084; // 기본 거리 아바타 크기 (0.028 × 3)
 
-function UserMarker({ position, user, onClick, profilePanelOpen }) {
+function UserMarker({ position, user, onClick, profilePanelOpen, onAvatarLoad }) {
   const scaleRef = useRef();
   const outerGroupRef = useRef();
   const labelScaleRef = useRef(null);
@@ -302,7 +316,7 @@ function UserMarker({ position, user, onClick, profilePanelOpen }) {
       <group ref={scaleRef}>
         <Suspense fallback={null}>
           {/* avatar: 더미 데이터용 GLB 경로, 없으면 기본 아바타 사용 */}
-          <AvatarModel url={user.avatar || `${S3_AVATAR_BASE}/m_1.glb`} />
+          <AvatarModel url={user.avatar || `${S3_AVATAR_BASE}/m_1.glb`} onLoad={onAvatarLoad} />
         </Suspense>
       </group>
 
@@ -600,6 +614,7 @@ const PROJECT_MODAL_TAG_PALETTE = [
 // 5. 메인 컴포넌트
 // ──────────────────────────────────────────────────────────────────
 export default function EarthCommunity() {
+  const [globeReady, setGlobeReady] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [showShop, setShowShop] = useState(false);
   const [guestGlobeLoginOpen, setGuestGlobeLoginOpen] = useState(false);
@@ -1604,7 +1619,7 @@ export default function EarthCommunity() {
       }}
     >
       {/* 별 반짝임 애니메이션 정의 — dark 테마 별에서 사용 */}
-      <style>{`@keyframes twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
+      <style>{`@keyframes twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       {/* 밤 테마일 때만 별 배경 레이어 표시 — 포인터 이벤트 없음(캔버스 클릭 방해 방지) */}
       {theme === 'dark' && nightStars.map(star => (
@@ -1626,6 +1641,17 @@ export default function EarthCommunity() {
         />
       ))}
       <div style={canvasHostStyle} onClick={handleCanvasClick}>
+        {/* 3D 에셋 로딩 오버레이 — 씬 마운트 전까지 표시 */}
+        {!globeReady && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'none',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.55)',
+          }}>
+            <img src="/earth.svg" alt="loading" style={{ width: 64, height: 64, animation: 'spin 1.5s linear infinite', opacity: 0.85 }} />
+            <span style={{ marginTop: 12, color: 'rgba(255,255,255,0.65)', fontSize: '0.9rem', letterSpacing: '0.08em' }}>로딩중...</span>
+          </div>
+        )}
         <div
           style={canvasWrapStyle}
           onPointerDown={handlePointerDown}
@@ -1641,16 +1667,15 @@ export default function EarthCommunity() {
                 autoRotate={autoRotate}
                 profilePanelOpen={Boolean(selectedUser)}
                 onSelectUser={(u) => {
-                  // 마커 클릭임을 표시 → 캔버스 onClick이 패널을 닫지 않도록
                   markerClickedRef.current = true;
                   setSelectedUser(u);
                 }}
                 onSceneClick={() => {
-                  // 지구본 본체 클릭 시에도 패널이 닫히지 않도록 표시
                   markerClickedRef.current = true;
                 }}
                 groupRef={earthRef}
                 dragRef={dragRef}
+                onReady={() => setGlobeReady(true)}
               />
             </Suspense>
             <CameraRig selectedUser={selectedUser} earthRef={earthRef} zoomRef={zoomRef} />
