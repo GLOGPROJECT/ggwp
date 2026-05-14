@@ -13,5 +13,6 @@ router.use('/hashtags', require('../feed/routes/hashtagRoutes'));
 router.use('/search', require('../feed/routes/searchRoutes'));
 
 router.use('/projects', require('../projects/routes'));
+router.use('/shop', require('../shop/routes'));
 
 module.exports = router;

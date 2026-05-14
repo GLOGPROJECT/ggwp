@@ -2,6 +2,7 @@ const axios = require('axios');
 const prisma = require('../config/db');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('./jwt');
 const { getRandomLandCoordinates } = require('../utils/landCoordinates');
+const { pickRandomAvatar } = require('../utils/avatarPool');
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
@@ -95,6 +96,7 @@ async function githubCallback(req, res) {
           is_setup_complete: false,
           github_access_token: githubAccessToken,
           github_login: githubUser.login || null,
+          model_url: pickRandomAvatar(),
         },
       });
       isNew = true;
@@ -217,11 +219,17 @@ async function getMe(req, res) {
       return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
     }
 
+    const equippedItem = await prisma.userItem.findFirst({
+      where: { user_id: req.user.userId, is_equipped: true },
+      include: { shop_item: { select: { image_url: true } } },
+    });
+
     res.json({
       user_id: user.user_id,
       github_id: user.github_id,
       nickname: user.nickname,
       avatar_url: user.avatar_url,
+      model_url: user.model_url,
       email: user.email,
       bio: user.bio,
       country: user.country,
@@ -234,6 +242,7 @@ async function getMe(req, res) {
       current_streak: user.coding_streak?.current_streak ?? 0,
       max_streak: user.coding_streak?.max_streak ?? 0,
       status: user.user_status?.status ?? 'offline',
+      pet_url: equippedItem?.shop_item?.image_url ?? null,
     });
   } catch (err) {
     console.error('[GetMe Error]', err.message);

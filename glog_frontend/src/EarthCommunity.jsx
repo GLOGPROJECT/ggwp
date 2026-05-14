@@ -849,6 +849,7 @@ export default function EarthCommunity() {
       color: "#4e9af1",
       avatar: me.model_url || pickAvatarByUserId(me.user_id),
       avatar_url: me.avatar_url || null,
+      pet_url: me.pet_url ?? null,
       isMe: true,
       status: me.status || "offline",
     };
@@ -866,6 +867,7 @@ export default function EarthCommunity() {
       color: "#4e9af1",
       avatar: me.model_url || pickAvatarByUserId(me.user_id),
       avatar_url: me.avatar_url || null,
+      pet_url: me.pet_url ?? null,
       lat,
       lon,
       status: me.status || "online",
@@ -1532,15 +1534,14 @@ export default function EarthCommunity() {
                     color: '#4e9af1',
                     avatar: me.model_url || pickAvatarByUserId(me.user_id),
                     avatar_url: me.avatar_url,
+                    pet_url: me.pet_url ?? null,
                     lat,
                     lon,
                     status: me.status || 'offline',
                     isMe: true,
                   });
                   requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                      snapEarthGroupTowardCamera(earthRef, lat, lon);
-                    });
+                    snapEarthGroupTowardCamera(earthRef, lat, lon);
                   });
                 } else if (item === '피드') {
                   navigate('/feed', { state: { feedRouteEnter: true } });
